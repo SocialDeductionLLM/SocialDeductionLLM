@@ -1,0 +1,10 @@
+#!/bin/bash
+python pretrainer.py --rwkv_id 2 --num_worlds 30 --update_epochs 20 --learning_rate 3e-4 --num_iterations 15 --fl_gamma 3 --discussion_turns 0 --discussion_reward_weight 10.0 --ema 0 --no-clip_vloss --kl_coef 0.1 --sl_lr 0.0 --randomize --ent_coef 0.01 --name "no_discuss"
+
+python train_crewmate.py --rwkv_id 2 --num_worlds 30 --update_epochs 9 --num_iterations 25 --fl_gamma 3 --discussion_turns 8 --name "full" --train_crewmates --no-train_imposters --no-clip_vloss --ema 0 --i_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --c_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --o_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --randomize --no-norm_adv --seed 1 --learning_rate 3e-4 --sl_coef 3.0 --vf_coef 1.0 --discussion_reward_weight 1.0 --d_coef 0.2 --a_coef 1.0 --ent_coef 0.01 --kl_coef 0.05
+
+python train_crewmate.py --rwkv_id 2 --num_worlds 30 --update_epochs 9 --num_iterations 25 --fl_gamma 3 --discussion_turns 8 --name "rl_sl" --train_crewmates --no-train_imposters --no-clip_vloss --ema 0 --i_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --c_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --o_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --randomize --no-norm_adv --seed 1 --learning_rate 3e-4 --sl_coef 0.25 --vf_coef 1.0 --discussion_reward_weight 0.0 --d_coef 0.2 --a_coef 1.0 --ent_coef 0.01 --kl_coef 0.05
+
+python train_crewmate.py --rwkv_id 2 --num_worlds 30 --update_epochs 9 --num_iterations 25 --fl_gamma 3 --discussion_turns 8 --name "rl_only" --train_crewmates --no-train_imposters --no-clip_vloss --ema 0 --i_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --c_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --o_checkpoint_name trained_models/Pretrain_5_1b5_0_no_discuss/14 --randomize --no-norm_adv --seed 1 --learning_rate 3e-4 --sl_coef 0.0 --vf_coef 1.0 --discussion_reward_weight 0.0 --d_coef 0.2 --a_coef 1.0 --ent_coef 0.01 --kl_coef 0.05
+
+
