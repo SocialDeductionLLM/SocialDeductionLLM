@@ -7,6 +7,8 @@ REPORTING_ALIGNMENT = 10
 
 MAX_NUM_PLAYERS = 7
 
+ALL_PLAYER_NAMES = ["Red", "Green", "Orange", "Purple", "Blue", "Yellow", "Pink"]
+# ALL_PLAYER_NAMES = ["0", "1", "2", "3", "4", "5", "6"]
 
 class PlayerType:
     IMPOSTER = 0
@@ -79,7 +81,7 @@ class StringAmogus:
         self.task_time = task_time
         self.cooldown_time = cooldown_time
 
-        self.player_names = [f"Player {i}" for i in range(self.num_players)]# + ["Observer"]
+        self.player_names = [f"Player {i}" for i in ALL_PLAYER_NAMES]# + ["Observer"]
         if num_observers > 0:
             self.player_names.append("Observer")
 
@@ -116,7 +118,7 @@ class StringAmogus:
         
         self.volunteering_players_order = []
 
-        self.all_mc_actions = [f'report body of Player {x}' for x in range(MAX_NUM_PLAYERS)] + [f'kill Player {x}' for x in range(MAX_NUM_PLAYERS)] + [f'do Task'] + [f'go north', 'go south', 'go west', 'go east'] + ['wait']
+        self.all_mc_actions = [f'report body of Player {x}' for x in ALL_PLAYER_NAMES] + [f'kill Player {x}' for x in ALL_PLAYER_NAMES] + [f'do Task'] + [f'go north', 'go south', 'go west', 'go east'] + ['wait']
         self.all_mc_actions = [f" {x}\n" for x in self.all_mc_actions]
         self.to_die = []
 
@@ -143,9 +145,10 @@ class StringAmogus:
         
         clean_options = list(clean_options.items())
         random.shuffle(clean_options)
-        clean_options = [" ".join(x) for x in clean_options]
+        clean_options = ','.join([": ".join(x) for x in clean_options])
+        # clean_options_str = ','.join([f'{x[:2]}:{x[:2]}' for x in clean_options])
         
-        self.world_print(i, f"You can perform any of the following actions: {clean_options}")
+        self.world_print(i, f"You can perform any of the following actions:{clean_options}")
         self.valid_actions[i].clear()
         self.actives[i] = True
         self.valid_actions[i] = [" " + chr(ord('B') + x) for x in option_indices]
@@ -155,12 +158,11 @@ class StringAmogus:
         
     def ping_player_direct(self, i, valid_tasks, do_shuffle=True):
         include_skip = [" skip\n"]
-        real_valid_tasks = [v[:-1] for v in valid_tasks] + [" Player skip"]
         # self.world_print(i, f"You can perform any of the following actions: {real_valid_tasks}")
         self.valid_actions[i].clear()
         self.actives[i] = True
-        self.valid_actions[i] = [v.strip()[-2:] for v in valid_tasks] + [" skip"]
-        self.true_valid_actions[i] = valid_tasks + include_skip
+        self.valid_actions[i] = valid_tasks + [" skip"]
+        self.true_valid_actions[i] = [x + "\n" for x in self.valid_actions[i]]
         self.actions[i] = ""
         self.observations[i] += f"[{self.world_time}] {self.player_names[self.player_state[i].name]} (you): Player"
         self.ask_probs[i] = True
@@ -174,7 +176,7 @@ class StringAmogus:
         self.observations[i] += f"[{self.world_time}] {self.player_names[self.player_state[i].name]} (you):"
 
     def ping_player_vote_survey(self, i):
-        living_ids = [" " + str(j) for j in range(self.num_players)]
+        living_ids = [" " + j for j in ALL_PLAYER_NAMES]
         self.valid_actions[i].clear()
         self.actives[i] = True
         self.valid_actions[i] = living_ids
@@ -185,7 +187,7 @@ class StringAmogus:
         self.ask_probs[i] = True
 
     def ping_observer_vote_survey(self, i):
-        living_ids = [" " + str(j) for j in range(self.num_players)]
+        living_ids = [" " + j for j in ALL_PLAYER_NAMES]
         self.valid_actions[i].clear()
         self.actives[i] = True
         self.valid_actions[i] = living_ids
@@ -205,7 +207,7 @@ class StringAmogus:
             # self.observations[i] += f"[{self.world_time}] World (to you): It is your turn to speak now.\n"
         self.observations[i] += f"[{self.world_time}] {self.player_names[self.player_state[i].name]} (you) saying: \""
 
-    def name_to_idx(self, name):
+    def name_to_idx(self, name): # TODO: SEEMS WRONG
         name_id = self.player_names.index(name)
         for i in range(self.num_players):
             if self.player_state[i].name == name_id:
@@ -243,7 +245,7 @@ class StringAmogus:
         p_act = self.actions[player]
         if p_act != "" and len(self.true_valid_actions[player]) != 0:
             true_act = self.true_valid_actions[player][self.valid_actions[player].index(p_act)]
-            self.observations[player] += ("\n" if p_act.strip() == true_act.strip()[-1] or len(p_act.strip()) != 1 else true_act)
+            self.observations[player] += ("\n" if p_act.strip() == true_act.strip()[-1] or len(p_act.strip()) != 1 else ":" + true_act)
             p_act = true_act
         if self.state == PhaseType.GAMEPLAY:
             if p_act == "":
@@ -294,7 +296,7 @@ class StringAmogus:
                 if p_act.startswith(" skip"):
                     self.votes[player] = -1
                 else:
-                    self.votes[player] = self.name_to_idx(p_act.strip())
+                    self.votes[player] = self.name_to_idx("Player " + p_act.strip())
         self.actives[player] = False
         self.valid_actions[player].clear()
         self.true_valid_actions[player].clear()
@@ -324,7 +326,8 @@ class StringAmogus:
         return name % self.width, name // self.width
 
     def process_intro(self):
-        self.world_print_all(f"You are playing the game of Among Us on a {self.width}x{self.height} grid. There are {self.num_players} players in total. The current set of players are: {', '.join(self.player_names)}. Of these players, {self.num_imposters} of them are secretly chosen randomly to be Imposters while the rest are Crewmates.")
+        living_mask = self.get_living_players_mask()
+        self.world_print_all(f"You are playing the game of Among Us on a {self.width}x{self.height} grid. There are {self.num_players} players in total. The current set of players are: {', '.join([self.player_names[i] for i in range(len(ALL_PLAYER_NAMES)) if living_mask[i]])}. Of these players, {self.num_imposters} of them are secretly chosen randomly to be Imposters while the rest are Crewmates.")
         self.world_print_all(f"The Crewmates can win the game one of two ways: either by completing all assigned tasks or by ejecting all Impostors. Each crewmate has to complete {self.num_tasks} tasks. Impostors can likewise win in two ways: either by killing or ejecting all Crewmates.")
 
         for i in range(self.num_players):
@@ -336,7 +339,7 @@ class StringAmogus:
         self.state = PhaseType.GAMEPLAY_INTRO
 
     def get_living_players_mask(self):
-        name_mask = [False for _ in range(self.num_players)]
+        name_mask = [False for _ in range(len(ALL_PLAYER_NAMES))]
         for i in range(self.num_players):
             if self.player_state[i].alive:
                 name_mask[self.player_state[i].name] = True
@@ -394,7 +397,7 @@ class StringAmogus:
         return uncompleted_tasks
 
     def get_innocent_players_mask(self):
-        name_mask = [False for _ in range(self.num_players)]
+        name_mask = [False for _ in range(len(ALL_PLAYER_NAMES))]
         for i in range(self.num_players):
             if self.player_state[i].alive and self.player_state[i].ptype == PlayerType.CREWMATE:
                 name_mask[self.player_state[i].name] = True
@@ -402,7 +405,7 @@ class StringAmogus:
 
     def process_gameplay_intro(self):
         living_mask = self.get_living_players_mask()
-        self.world_print_all(f"The currently alive players are: {', '.join([self.player_names[i] for i in range(self.num_players) if living_mask[i]])}.")
+        self.world_print_all(f"The currently alive players are: {', '.join([self.player_names[i] for i in range(len(ALL_PLAYER_NAMES)) if living_mask[i]])}.")
         self.state = PhaseType.GAMEPLAY
         for i in range(self.num_players):
             if self.player_state[i].alive:
@@ -519,7 +522,7 @@ class StringAmogus:
         if self.world_time % REPORTING_ALIGNMENT != 0:
             return
         living_mask = self.get_living_players_mask()
-        self.world_print_all(f"The discussion period is beginning. If you have important information, now is the best time to share it. There will be 2 messages sent by each player during this period, followed by a voting period where you can choose a person to eject or withold your vote. As a reminder, the currently alive players are: {', '.join([self.player_names[i] for i in range(self.num_players) if living_mask[i]])}.")
+        self.world_print_all(f"The discussion period is beginning. If you have important information, now is the best time to share it. There will be 2 messages sent by each player during this period, followed by a voting period where you can choose a person to eject or withold your vote. As a reminder, the currently alive players are: {', '.join([self.player_names[i] for i in range(len(ALL_PLAYER_NAMES)) if living_mask[i]])}.")
         self.discussion_turns = 0
         self.volunteering_players_order = []
         for i in range(self.num_players):
@@ -619,10 +622,10 @@ class StringAmogus:
 
     def process_voting_intro(self):
         living_mask = self.get_living_players_mask()
-        self.world_print_all(f"The voting period is beginning. You can vote 'skip' or eject on of the currently alive players: {', '.join([self.player_names[i] for i in range(self.num_players) if living_mask[i]])}. What will you vote?")
+        self.world_print_all(f"The voting period is beginning. You can vote 'skip' or eject one of the currently alive players. What will you vote?") # : {', '.join([self.player_names[i] for i in range(len(ALL_PLAYER_NAMES)) if living_mask[i]])}
         for i in range(self.num_players):
             if self.player_state[i].alive:
-                self.ping_player_direct(i, [f" {self.player_names[i]}\n" for i in range(self.num_players) if living_mask[i]])
+                self.ping_player_direct(i, [f" {ALL_PLAYER_NAMES[i]}" for i in range(len(ALL_PLAYER_NAMES)) if living_mask[i]])
         self.state = PhaseType.VOTING_RESULT
         self.votes = {}
 
@@ -769,7 +772,7 @@ class StringAmogus:
         self.player_state = [PlayerState() for _ in range(self.num_players)]
         self.state = PhaseType.INTRO
 
-        names = list(range(self.num_players))
+        names = list(range(len(ALL_PLAYER_NAMES)))
         random.shuffle(names)
 
         for i in range(self.num_players):

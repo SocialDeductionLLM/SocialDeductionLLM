@@ -31,21 +31,22 @@ args = tyro.cli(utils.Args)
 args.use_rl = False
 args.use_bc = True
 # args.use_sl = True
-args.use_wm = True
+# args.use_wm = False
 
 
 RWKV_NAME = utils.RWKV_NAMES[args.rwkv_id]
 
-full_name = f"Pretrain_{args.num_imposters + args.num_crewmates}_{RWKV_NAME.split('-')[-1]}_{args.seed}_{args.name}"
+full_name = f"Pretrain_{args.num_imposters + args.num_crewmates}_{RWKV_NAME.split('-')[-1]}_{args.other_seed}_{args.seed}_{args.name}"
 
 if args.track:
+    # wandb.login(key="ccd5ae30c5827ee007ef68820a736dbbba1a3241")
     wandb.init(
-        project="amogus_pretrain2",
+        project="amogus_v2",
         name=full_name,
         config=vars(args)
     )
 
-utils.random_seed(args.seed)
+utils.random_seed(args.seed + args.other_seed)
 
 args.checkpoint_name = RWKV_NAME
 
@@ -89,6 +90,14 @@ for iteration in tqdm(range(args.num_iterations), desc=" outer", position=0):
     # print(cbuf.returns, ibuf.returns)
 
     for _ in range(args.re_iterations):
+        past_accuracies = []
+        for epoch in range(args.update_epochs):
+            cur_losses = utils.do_eval(args, cbuf, c_model, advantages_mean, advantages_std, epoch, True, args.update_epochs, c_optimizer, ho_model=base_model)
+            if len(cur_losses) != 0:
+                past_accuracies.append(np.mean(cur_losses))
+            else:
+                past_accuracies.append(0)
+                
         for epoch in range(args.update_epochs):
             all_losses = {'bc_loss': 0, 'loss_ans': 0, 'loss_lm': 0, 'pg_loss': 0, 'entropy_loss': 0, 'v_loss': 0, 'kl_logratio': 0, 'sl_kl_logratio': 0, 'all_probs': [], 'minipile': 0}
             cur_losses = utils.do_train(args, cbuf, c_model, advantages_mean, advantages_std, epoch, True, args.update_epochs, c_optimizer, ho_model=base_model)
@@ -105,6 +114,7 @@ for iteration in tqdm(range(args.num_iterations), desc=" outer", position=0):
                 track_dict['accuracy'] = np.mean(all_losses['all_probs'])
                 track_dict['acc_std'] = np.std(all_losses['all_probs'])
                 track_dict['min_acc'] = min(all_losses['all_probs'])
+                track_dict['true_acc'] = past_accuracies[epoch]
             if args.track:
                 wandb.log(track_dict)
 

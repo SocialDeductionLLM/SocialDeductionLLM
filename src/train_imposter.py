@@ -34,11 +34,11 @@ args.use_bc = False
 
 RWKV_NAME = utils.RWKV_NAMES[args.rwkv_id]
 
-full_name = f"Imposter_{args.num_imposters + args.num_crewmates}_{RWKV_NAME.split('-')[-1]}_{args.seed}_{args.name}"
+full_name = f"Imposter_{args.num_imposters + args.num_crewmates}_{RWKV_NAME.split('-')[-1]}_{args.other_seed}_{args.seed}_{args.name}"
 
 if args.track:
     wandb.init(
-        project="amogus_sp2",
+        project="amogus_v2",
         name=full_name,
         config=vars(args)
     )

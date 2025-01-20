@@ -23,6 +23,7 @@ class Args:
     """if toggled, this experiment will be tracked with Weights and Biases"""
     seed: int = 0
     """seed of the experiment"""
+    other_seed: int = 0
     world_width: int = 3
     """width of the world"""
     world_height: int = 2
@@ -45,7 +46,7 @@ class Args:
     """Use RL Loss"""
     use_sl: bool = True
     """Use SL Loss"""
-    use_wm: bool = True
+    use_wm: bool = False
     """ Use WM Loss"""
 
     use_bc: bool = False
@@ -172,7 +173,7 @@ def reevaluate_logprobs(args, buf, model, epoch, update_epochs):
         last_logits = torch.zeros((buf.logprobs.shape[0]//update_epochs, 1, 65536), device="cuda", dtype=buf.logprobs.dtype)
         full_token_len = buf.all_tokens.shape[1]
         for start_subset in range(0, full_token_len, 1024):
-            outputs = model.forward(input_ids=buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024], state=states, use_cache=True)
+            # outputs = model.forward(input_ids=buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024], state=states, use_cache=True)
             if torch.all(buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024] == 0):
                 break
 
@@ -195,7 +196,8 @@ def reevaluate_logprobs(args, buf, model, epoch, update_epochs):
 def do_train(args, buf, model, advantages_mean, advantages_std, epoch, do_sl, update_epochs, optimizer, ho_model=None):
     if args.ema > 0:
         ema_model = copy.deepcopy(model)
-    
+    num_games = buf.all_tokens.shape[0] // update_epochs
+        
     full_token_len = buf.all_tokens.shape[1]
     states = get_state(model, buf.all_tokens.shape[0] // update_epochs)
     last_logits = torch.zeros((buf.logprobs.shape[0]//update_epochs, 1, 65536), device="cuda", dtype=buf.logprobs.dtype)
@@ -206,6 +208,9 @@ def do_train(args, buf, model, advantages_mean, advantages_std, epoch, do_sl, up
     all_losses = {'bc_loss': 0, 'loss_lm': 0, 'pg_loss': 0, 'entropy_loss': 0, 'v_loss': 0, 'kl_logratio': 0, 'sl_kl_logratio': 0, 'all_probs': []}
     if do_sl:
         all_losses["loss_ans"] = 0
+
+    start_epoch = epoch * num_games
+    end_epoch = start_epoch + num_games
 
     for start_subset in range(0, full_token_len, 1024):
         if torch.all(buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024] == 0):
@@ -223,10 +228,10 @@ def do_train(args, buf, model, advantages_mean, advantages_std, epoch, do_sl, up
         
         # Pure world modeling
         wm_mask = (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] == 1)
-        true_wm_answer = buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024]
+        true_wm_answer = buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024] - MAX_NUM_PLAYERS
 
         ans_view_restricted_wm = ans_view[wm_mask]
-        true_wm_answer_restricted = true_wm_answer[wm_mask] - MAX_NUM_PLAYERS
+        true_wm_answer_restricted = true_wm_answer[wm_mask]
 
         cross_entropy_wm = F.cross_entropy(ans_view_restricted_wm, true_wm_answer_restricted, reduction='mean')
 
@@ -255,6 +260,7 @@ def do_train(args, buf, model, advantages_mean, advantages_std, epoch, do_sl, up
         rl_mask = (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] > 1) #& (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] <= 3)
         discussion_mask = (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] == 3)
         pure_rl_mask = (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] == 2)
+        bc_mask = (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] == 2) | (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] == 3)
 
         if not args.use_d:
             rl_mask = pure_rl_mask
@@ -333,7 +339,7 @@ def do_train(args, buf, model, advantages_mean, advantages_std, epoch, do_sl, up
         entropy_loss = entropy#.nanmean()
         loss = 0
         if args.use_bc:
-            bc_loss = F.cross_entropy(ans_view[pure_rl_mask], true_wm_answer[pure_rl_mask] - MAX_NUM_PLAYERS, reduction='none')
+            bc_loss = F.cross_entropy(ans_view[bc_mask], true_wm_answer[bc_mask], reduction='none')
             bc_loss = (bc_loss * ((1 - (-bc_loss).exp()) ** args.fl_gamma)).nanmean() - entropy_loss * args.ent_coef
             loss = bc_loss + v_loss * args.vf_coef + kl_logratio * args.kl_coef
         if args.use_rl:
@@ -374,3 +380,54 @@ def do_train(args, buf, model, advantages_mean, advantages_std, epoch, do_sl, up
     all_losses['all_probs'] = all_probs
     return all_losses
     
+
+
+def do_eval(args, buf, model, advantages_mean, advantages_std, epoch, do_sl, update_epochs, optimizer, ho_model=None):
+    with torch.no_grad():
+        if args.ema > 0:
+            ema_model = copy.deepcopy(model)
+        num_games = buf.all_tokens.shape[0] // update_epochs
+
+        full_token_len = buf.all_tokens.shape[1]
+        states = get_state(model, buf.all_tokens.shape[0] // update_epochs)
+        last_logits = torch.zeros((buf.logprobs.shape[0]//update_epochs, 1, 65536), device="cuda", dtype=buf.logprobs.dtype)
+        all_probs = []
+
+        start_epoch = epoch * num_games
+        end_epoch = start_epoch + num_games
+
+        for start_subset in range(0, full_token_len, 1024):
+            if torch.all(buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024] == 0):
+                break
+
+            outputs = model.forward(input_ids=buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024], state=states, use_cache=True)
+            states = outputs.state.detach()
+            ans_view = torch.cat([last_logits[:, :, MAX_NUM_PLAYERS:], outputs.logits[:, :-1, MAX_NUM_PLAYERS:]], dim=1)
+
+            # Pure world modeling
+            wm_mask = (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] == 1)
+            true_wm_answer = buf.all_tokens[epoch::update_epochs, start_subset:start_subset+1024] - MAX_NUM_PLAYERS
+
+            ans_view_restricted_wm = ans_view[wm_mask]
+            true_wm_answer_restricted = true_wm_answer[wm_mask]
+
+            cross_entropy_wm = F.cross_entropy(ans_view_restricted_wm, true_wm_answer_restricted, reduction='mean')
+
+            sl_kl_logratio = 0
+
+            if do_sl:
+                # Pure supervised
+                supervised_mask = (buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024] > 3)
+
+                true_supervised_answer = buf.token_flags[epoch::update_epochs, start_subset:start_subset+1024]
+                ans_view_restricted_supervised = ans_view[supervised_mask]
+                true_supervised_answer_restricted = true_supervised_answer[supervised_mask] - MAX_NUM_PLAYERS
+
+                pure_cross_entropy = F.cross_entropy(ans_view_restricted_supervised, true_supervised_answer_restricted, reduction='none')
+                extracted_probabilities = (-pure_cross_entropy).exp()
+                all_probs.extend(extracted_probabilities.tolist())
+
+            if start_subset + 1023 <= full_token_len:
+                last_logits = outputs.logits[:, -1:].detach()
+
+        return all_probs

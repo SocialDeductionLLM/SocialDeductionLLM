@@ -53,7 +53,7 @@ class HybridModel:
 
     def forward(self, input_ids, state=False, use_cache=True, lengths=0, valid_actions=None):
         output = self.language_model.forward(input_ids=input_ids, state=state, use_cache=use_cache, lengths=lengths, valid_actions=valid_actions)
-        output.logits[:, :, 315:321] = -10000
+        output.logits[:, :, 301:321] = -10000
         mask = [x is not None and len(x) > 0 for x in valid_actions]
         if not any(mask):
             return output
@@ -221,7 +221,7 @@ def pre_action_real(worlds, start_idx, end_idx, stepped_env, tokenizer, buffers)
                 #print("VALID ACTIONS FOR", i, "is", valid_action)
                 i_valid_actions[env_idx][i - start_idx] = parsed_valid_action
                 if env.ask_probs[i]:
-                    i_next_action_type[env_idx][i-start_idx] = tokenizer.encode(" " + str(env.supervised_answer))[0]
+                    i_next_action_type[env_idx][i-start_idx] = tokenizer.encode(" " + string_env.ALL_PLAYER_NAMES[env.supervised_answer])[0]
                 if len(parsed_valid_action) == 0:
                     i_next_action_type[env_idx][i-start_idx] = SPEAKING_ACTION_FLAG
                     
@@ -385,7 +385,7 @@ def get_flattened_buffers(i_buffers, do_calc=True):
     #print("CALCULATING DONE")
     return toret
 
-def collect_real_buffers(models, splits, tokenizer, num_worlds, num_players=5, num_imposters=1, world_width=3, min_world_width=None, world_height=2, discussion_turns=6, num_observers=0, discussion_reward_weight=0.1, reporting_alignment=10, num_tasks=5, min_num_tasks=None, randomize=False):
+def collect_real_buffers(models, splits, tokenizer, num_worlds, num_players=5, num_imposters=1, world_width=3, min_world_width=None, world_height=2, discussion_turns=6, num_observers=0, discussion_reward_weight=0.1, reporting_alignment=10, num_tasks=5, min_num_tasks=None, randomize=False, do_calc=True):
     min_world_width = world_width if min_world_width is None else min_world_width
     min_num_tasks = num_tasks if min_num_tasks is None else min_num_tasks
     string_env.REPORTING_ALIGNMENT = reporting_alignment
@@ -427,7 +427,8 @@ def collect_real_buffers(models, splits, tokenizer, num_worlds, num_players=5, n
     final_observations = [None for _ in models]
 
     #pbar = tqdm(total=300, desc=" inner loop", position=1)
-    
+
+    times = {"STEP":0, "PRE_ACTION": 0, "PREPEND_OBS": 0, "CHOOSE_ACTION": 0, "POST_ACTION": 0, "BUFFERS": 0}
     while True:
         num_rounds += 1
         #pbar.update(1)
@@ -437,28 +438,49 @@ def collect_real_buffers(models, splits, tokenizer, num_worlds, num_players=5, n
         all_done = all([world.done for world in worlds])
         if all_done:
             break
+
+        start_time = time.time()
         stepped_env = [False for _ in range(num_worlds)]
         for env_idx, env in enumerate(worlds):
             if env.done:
                 continue
             env.step()
             stepped_env[env_idx] = True
+        times['STEP'] += time.time() - start_time
+        start_time = time.time()
 
         for i in range(len(splits)):
             next_obs, valid_actions, next_action_type = pre_action_real(worlds, calculated_splits[i], calculated_splits[i+1], stepped_env, tokenizer, buffers[i])
             
+            times['PRE_ACTION'] += time.time() - start_time
+            start_time = time.time()
+            
             prepend_obs(next_obs, final_indices[i], final_observations[i])
+            
+            times['PREPEND_OBS'] += time.time() - start_time
+            start_time = time.time()
 
             actions, probs, final_indices[i], final_observations[i] = choose_action_real(next_obs, valid_actions, buffers[i], models[i], tokenizer, next_action_type, split_value_idx[i])
+            
+            times['CHOOSE_ACTION'] += time.time() - start_time
+            start_time = time.time()
+            
             post_action_real(worlds, calculated_splits[i], calculated_splits[i+1], actions, tokenizer, valid_actions, probs)
+            
+            times['POST_ACTION'] += time.time() - start_time
+            start_time = time.time()
 
-    torch_buffers = [get_flattened_buffers(b) for b in buffers]
+    torch_buffers = [get_flattened_buffers(b, do_calc) for b in buffers]
     # torch_o_buffers = get_flattened_buffers(o_buffers, do_calc=False)
     sparse_i_wins = [sum([r[0] for r in b[0].separated_rewards]) for b in buffers[0]]
     sparse_c_wins = [sum([r[0] for r in b[0].separated_rewards]) for b in buffers[1]]
     discussion_benefits = [[sum([r[2] for r in bi.separated_rewards]) for bi in b] for b in buffers[1]]
     held_out_benefits = [[sum([r[3] for r in bi.separated_rewards]) for bi in b] for b in buffers[1]]
+    
+    times['BUFFERS'] += time.time() - start_time
+    start_time = time.time()
 
     # print(tokenizer.decode(torch_o_buffers.all_tokens[0]))
     print("NUM STEPS:", num_rounds)
+    print(times)
     return torch_buffers, sparse_i_wins, sparse_c_wins, discussion_benefits, held_out_benefits

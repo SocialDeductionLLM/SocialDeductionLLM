@@ -1,0 +1,13 @@
+huggingface_hub
+datasets
+tyro
+numpy<2
+tqdm
+importlib-resources
+wandb
+torch
+schedulefree
+transformers
+ninja
+termcolor
+accelerate
